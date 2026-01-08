@@ -1,13 +1,23 @@
 // This method is called when your extension is deactivated
-export function deactivate() {}
+export function deactivate() {
+  // Clean up all active terminals
+  for (const [, pty] of activeTerminals) {
+    pty.dispose()
+  }
+  activeTerminals.clear()
+}
 
 import * as vscode from "vscode"
+import { createOpencodePseudoterminal, OpencodePty } from "./pseudoterminal"
 
-const TERMINAL_NAME = "opencode"
+const TERMINAL_NAME = "OpenCode"
+
+// Track active terminals by port
+const activeTerminals = new Map<number, OpencodePty>()
 
 export function activate(context: vscode.ExtensionContext) {
   let openNewTerminalDisposable = vscode.commands.registerCommand("opencode.openNewTerminal", async () => {
-    await openTerminal()
+    await openTerminal(context)
   })
 
   let openTerminalDisposable = vscode.commands.registerCommand("opencode.openTerminal", async () => {
@@ -18,7 +28,7 @@ export function activate(context: vscode.ExtensionContext) {
       return
     }
 
-    await openTerminal()
+    await openTerminal(context)
   })
 
   let addFilepathDisposable = vscode.commands.registerCommand("opencode.addFilepathToTerminal", async () => {
@@ -32,37 +42,54 @@ export function activate(context: vscode.ExtensionContext) {
       return
     }
 
-    if (terminal.name === TERMINAL_NAME) {
-      // @ts-ignore
-      const port = terminal.creationOptions.env?.["_EXTENSION_OPENCODE_PORT"]
-      port ? await appendPrompt(parseInt(port), fileRef) : terminal.sendText(fileRef, false)
+    if (terminal.name === TERMINAL_NAME || terminal.name.startsWith("OC | ")) {
+      // Find the port for this terminal
+      const port = findPortForTerminal(terminal)
+      if (port) {
+        await appendPrompt(port, fileRef)
+      } else {
+        terminal.sendText(fileRef, false)
+      }
       terminal.show()
     }
   })
 
-  context.subscriptions.push(openTerminalDisposable, addFilepathDisposable)
+  // Clean up when terminals are closed
+  const terminalCloseListener = vscode.window.onDidCloseTerminal((closedTerminal) => {
+    const entry = [...activeTerminals.entries()].find(([, pty]) => pty.terminal === closedTerminal)
+    if (entry) {
+      const [port, pty] = entry
+      pty.dispose()
+      activeTerminals.delete(port)
+    }
+  })
 
-  async function openTerminal() {
-    // Create a new terminal in split screen
+  context.subscriptions.push(
+    openTerminalDisposable,
+    openNewTerminalDisposable,
+    addFilepathDisposable,
+    terminalCloseListener
+  )
+
+  function findPortForTerminal(terminal: vscode.Terminal): number | undefined {
+    for (const [port, pty] of activeTerminals) {
+      if (pty.terminal === terminal) {
+        return port
+      }
+    }
+    return undefined
+  }
+
+  async function openTerminal(context: vscode.ExtensionContext) {
+    // Generate a random port
     const port = Math.floor(Math.random() * (65535 - 16384 + 1)) + 16384
-    const terminal = vscode.window.createTerminal({
-      name: TERMINAL_NAME,
-      iconPath: {
-        light: vscode.Uri.file(context.asAbsolutePath("images/button-dark.svg")),
-        dark: vscode.Uri.file(context.asAbsolutePath("images/button-light.svg")),
-      },
-      location: {
-        viewColumn: vscode.ViewColumn.Beside,
-        preserveFocus: false,
-      },
-      env: {
-        _EXTENSION_OPENCODE_PORT: port.toString(),
-        OPENCODE_CALLER: "vscode",
-      },
-    })
 
-    terminal.show()
-    terminal.sendText(`opencode --port ${port}`)
+    // Create pseudoterminal (title updates come from ANSI escape sequences)
+    const pty = createOpencodePseudoterminal(port, context)
+    pty.terminal.show()
+
+    // Track terminal
+    activeTerminals.set(port, pty)
 
     const fileRef = getActiveFile()
     if (!fileRef) {
@@ -86,7 +113,7 @@ export function activate(context: vscode.ExtensionContext) {
     // If connected, append the prompt to the terminal
     if (connected) {
       await appendPrompt(port, `In ${fileRef}`)
-      terminal.show()
+      pty.terminal.show()
     }
   }
 
