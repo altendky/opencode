@@ -788,15 +788,12 @@ export const toModelMessagesEffect = Effect.fnUntraced(function* (
             text,
             ...(differentModel ? {} : { providerMetadata: part.metadata }),
           })
-        if (part.type === "step-start") {
-          sawTool = false
         }
         if (part.type === "step-start") {
           sawTool = false
           assistantMessage.parts.push({
             type: "step-start",
           })
-        }
         }
         if (part.type === "tool") {
           toolNames.add(part.tool)
