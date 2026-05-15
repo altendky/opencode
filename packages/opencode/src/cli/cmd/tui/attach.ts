@@ -1,6 +1,6 @@
 import { cmd } from "../cmd"
 import { UI } from "@/cli/ui"
-import { win32DisableProcessedInput, win32InstallCtrlCGuard } from "./win32"
+import { win32DisableProcessedInput, win32InstallCtrlCGuard } from "./console"
 import { TuiConfig } from "@/cli/cmd/tui/config/tui"
 import { errorMessage } from "@/util/error"
 import { validateSession } from "./validate-session"
