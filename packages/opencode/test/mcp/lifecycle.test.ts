@@ -890,48 +890,52 @@ it.instance(
 // Test: dynamically added server appears in MCP.status()
 // ========================================================================
 
-test(
+it.instance(
   "dynamically added server appears in status",
-  withInstance({}, (mcp) =>
-    Effect.gen(function* () {
-      lastCreatedClientName = "dynamic-server"
-      getOrCreateClientState("dynamic-server")
+  () =>
+    MCP.Service.use((mcp: MCPNS.Interface) =>
+      Effect.gen(function* () {
+        lastCreatedClientName = "dynamic-server"
+        getOrCreateClientState("dynamic-server")
 
-      yield* mcp.add("dynamic-server", {
-        type: "local",
-        command: ["echo", "test"],
-      })
+        yield* mcp.add("dynamic-server", {
+          type: "local",
+          command: ["echo", "test"],
+        })
 
-      const status = yield* mcp.status()
-      expect(status["dynamic-server"]).toBeDefined()
-      expect(status["dynamic-server"]?.status).toBe("connected")
-    }),
-  ),
+        const status = yield* mcp.status()
+        expect(status["dynamic-server"]).toBeDefined()
+        expect(status["dynamic-server"]?.status).toBe("connected")
+      }),
+    ),
+  { config: { mcp: {} } },
 )
 
 // ========================================================================
 // Test: MCP.add() publishes TuiEvent.McpRefresh
 // ========================================================================
 
-test(
+it.instance(
   "add publishes TuiEvent.McpRefresh",
-  withInstance({}, (mcp) =>
-    Effect.gen(function* () {
-      const events: Array<Record<string, unknown>> = []
-      const unsubscribe = Bus.subscribe(TuiEvent.McpRefresh, (evt) => {
-        events.push(evt.properties)
-      })
+  () =>
+    MCP.Service.use((mcp: MCPNS.Interface) =>
+      Effect.gen(function* () {
+        const events: Array<Record<string, unknown>> = []
+        const unsubscribe = Bus.subscribe(TuiEvent.McpRefresh, (evt) => {
+          events.push(evt.properties)
+        })
 
-      lastCreatedClientName = "refresh-server"
-      getOrCreateClientState("refresh-server")
+        lastCreatedClientName = "refresh-server"
+        getOrCreateClientState("refresh-server")
 
-      yield* mcp.add("refresh-server", {
-        type: "local",
-        command: ["echo", "test"],
-      })
+        yield* mcp.add("refresh-server", {
+          type: "local",
+          command: ["echo", "test"],
+        })
 
-      unsubscribe()
-      expect(events).toHaveLength(1)
-    }),
-  ),
+        unsubscribe()
+        expect(events).toHaveLength(1)
+      }),
+    ),
+  { config: { mcp: {} } },
 )
