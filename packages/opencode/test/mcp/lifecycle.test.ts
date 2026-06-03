@@ -1,5 +1,5 @@
 import { expect, mock, beforeEach } from "bun:test"
-import { Effect, Exit } from "effect"
+import { Cause, Effect, Exit, Layer } from "effect"
 import type { MCP as MCPNS } from "../../src/mcp/index"
 import { testEffect } from "../lib/effect"
 
@@ -179,14 +179,11 @@ beforeEach(() => {
 
 // Import after mocks
 const { MCP } = await import("../../src/mcp/index")
-const { Instance } = await import("../../src/project/instance")
-const { WithInstance } = await import("../../src/project/with-instance")
-const { tmpdir } = await import("../fixture/fixture")
-const { Bus } = await import("../../src/bus")
+const { EventV2Bridge } = await import("../../src/event-v2-bridge")
 const { TuiEvent } = await import("../../src/cli/cmd/tui/event")
 const { McpOAuthCallback } = await import("../../src/mcp/oauth-callback")
 
-const it = testEffect(MCP.defaultLayer)
+const it = testEffect(Layer.mergeAll(MCP.defaultLayer, EventV2Bridge.defaultLayer))
 
 function statusName(status: Record<string, MCPNS.Status> | MCPNS.Status, server: string) {
   if ("status" in status) return status.status
@@ -640,12 +637,15 @@ it.instance(
 // ========================================================================
 
 it.instance(
-  "connect() on nonexistent server does not throw",
+  "connect() on nonexistent server fails with NotFoundError",
   () =>
     MCP.Service.use((mcp: MCPNS.Interface) =>
       Effect.gen(function* () {
-        // Should not throw
-        yield* mcp.connect("nonexistent")
+        const exit = yield* mcp.connect("nonexistent").pipe(Effect.exit)
+        expect(Exit.isFailure(exit)).toBe(true)
+        if (Exit.isFailure(exit)) {
+          expect(Cause.squash(exit.cause)).toMatchObject({ _tag: "MCP.NotFoundError", name: "nonexistent" })
+        }
         const status = yield* mcp.status()
         expect(status["nonexistent"]).toBeUndefined()
       }),
@@ -658,12 +658,15 @@ it.instance(
 // ========================================================================
 
 it.instance(
-  "disconnect() on nonexistent server does not throw",
+  "disconnect() on nonexistent server fails with NotFoundError",
   () =>
     MCP.Service.use((mcp: MCPNS.Interface) =>
       Effect.gen(function* () {
-        yield* mcp.disconnect("nonexistent")
-        // Should complete without error
+        const exit = yield* mcp.disconnect("nonexistent").pipe(Effect.exit)
+        expect(Exit.isFailure(exit)).toBe(true)
+        if (Exit.isFailure(exit)) {
+          expect(Cause.squash(exit.cause)).toMatchObject({ _tag: "MCP.NotFoundError", name: "nonexistent" })
+        }
       }),
     ),
   { config: { mcp: {} } },
@@ -920,10 +923,13 @@ it.instance(
   () =>
     MCP.Service.use((mcp: MCPNS.Interface) =>
       Effect.gen(function* () {
-        const events: Array<Record<string, unknown>> = []
-        const unsubscribe = Bus.subscribe(TuiEvent.McpRefresh, (evt) => {
-          events.push(evt.properties)
+        const bridge = yield* EventV2Bridge.Service
+        let refreshEvents = 0
+        const unsubscribe = yield* bridge.listen((evt) => {
+          if (evt.type === TuiEvent.McpRefresh.type) refreshEvents++
+          return Effect.void
         })
+        yield* Effect.addFinalizer(() => unsubscribe)
 
         lastCreatedClientName = "refresh-server"
         getOrCreateClientState("refresh-server")
@@ -933,8 +939,7 @@ it.instance(
           command: ["echo", "test"],
         })
 
-        unsubscribe()
-        expect(events).toHaveLength(1)
+        expect(refreshEvents).toBe(1)
       }),
     ),
   { config: { mcp: {} } },
